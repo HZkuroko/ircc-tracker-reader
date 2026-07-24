@@ -1,197 +1,199 @@
 # IRCC Tracker Safe Windows
 
-一个非官方、开源的 Windows 查询脚本，用于在 IRCC Application Status Tracker 网页不可用时，尝试查询**你本人或你获授权管理的申请**。
-IRCC网站很多时候在加拿大夜间是不可访问的，目前还在测试看看接口是不是没了，现在要等到了IRCC工作时间再测试
+一个非官方、开源、隐私优先的 Windows IRCC Application Status Tracker 查询与诊断工具。
 
 > [!IMPORTANT]
-> **当前状态：实验性。** 2026-07-24 实测中，AWS Cognito 登录可以成功，但 IRCC 数据接口可能在返回结果前主动关闭连接。因此，目前不能保证取得申请状态。本项目与 IRCC、加拿大政府或 AWS 没有隶属或授权关系。
+> **当前版本：v2.0.1-diagnostic（实验性）**。Cognito 登录可能成功，但 IRCC 数据接口目前可能关闭连接或返回维护错误。本工具不能保证取得申请状态，也不能修复 IRCC 服务端故障。
 
-## 文件说明
-
-仓库刻意保持精简：
+## 文件
 
 ```text
-README.md                  说明、教程、安全与排错（本文件）
+README.md                  GitHub 项目说明
+使用教程.txt               普通用户使用说明
 IRCC_Status_Check.ps1      主程序
-点击运行IRCC查询.cmd           Windows 双击启动器
-LICENSE                    MIT 开源许可
-.gitignore                 防止误上传日志和本地敏感文件
+点击运行IRCC查询.cmd       实际双击运行文件
+LICENSE                    MIT License
+.gitignore                 防止误上传敏感运行文件
 ```
 
-真正运行时只需要 `.ps1` 和 `.cmd`；其余三个文件用于 GitHub 项目说明、授权和隐私保护。
+## v2.0 改进
 
-## 工作原理
+- 优先使用 PowerShell 7；未安装时回退至 Windows PowerShell 5.1；
+- 网络层改用 `System.Net.Http.HttpClient`；
+- 增加合理的 `Accept`、`Origin`、`Referer`、User-Agent 和 no-cache Header；
+- Cognito 登录后在本地检查 JWT 的 `token_use`、`aud`、`iss` 和过期时间；
+- 先调用 `get-profile-summary`，精确确认 Application Number 属于当前账号；
+- 再调用 `get-application-details`，避免盲目读取第一条记录；
+- 默认不创建 `StatusCheck.txt`，结果只显示在当前窗口；
+- 不自动重试；失败后由用户选择退出或**手动重试一次**；
+- 最多两次总尝试（首次 + 一次手动重试）；
+- 保留脱敏诊断信息，但不显示响应正文、Token、凭据或申请编号；
+- UCI 可输入纯数字或官方带连字符格式，内部统一转换为 8 位/10 位纯数字；
+- 输入 UCI 和 Application Number 后自动清屏。
+
+## 工作流程
 
 ```text
-用户输入账号和密码
-        ↓
-AWS Cognito 登录并返回临时 Token
-        ↓
-脚本携带 Token、Application Number 和 UCI
-请求 IRCC Tracker 数据接口
-        ↓
-整理状态并写入本地 StatusCheck.txt
+用户输入 UCI、Application Number、密码
+                    ↓
+AWS Cognito 登录并取得临时 IdToken
+                    ↓
+本地验证 JWT 的用途、受众、签发者和有效期
+                    ↓
+get-profile-summary 精确匹配 Application Number
+                    ↓
+get-application-details 读取申请状态
+                    ↓
+只在当前窗口显示；退出后不保存结果
 ```
 
-这不是绕过登录：必须使用用户自己的有效凭据。脚本不会提交或修改申请。
+## 使用方法
 
-## 安全与隐私
-
-脚本只连接以下两个固定 HTTPS 地址：
-
-| 用途 | 地址 | 发送的数据 |
-|---|---|---|
-| 登录 | `https://cognito-idp.ca-central-1.amazonaws.com/` | Tracker 用户名、密码、公开 Client ID |
-| 查询 | `https://api.ircc-tracker-suivi.apps.cic.gc.ca/user` | 临时 Token、Application Number、UCI、`isAgent=false` |
-
-安全设计：
-
-- 密码在运行时隐藏输入，不写入脚本或日志；
-- 输入完成后自动清屏，减少截图泄露风险；
-- Token 不写入磁盘；
-- 没有遥测、广告、Webhook 或第三方数据上传；
-- 不使用 `iex` / `Invoke-Expression`；
-- 不下载或执行远程代码；
-- 不关闭 TLS 证书验证；
-- 日志最多保留最近 30 次，并尝试限制为当前 Windows 用户访问。
-
-`StatusCheck.txt` 虽然不记录密码、Token、UCI 或申请号，但申请状态仍属于个人隐私。不要上传到 GitHub、网盘、群聊或 Issue。
-
-## 系统要求
-
-- Windows 10 或 Windows 11；
-- Windows PowerShell 5.1；
-- 用户本人的 IRCC Tracker 凭据；
-- 可访问 AWS Cognito 和 IRCC Tracker API 的网络。
-
-## 使用教程
-
-1. 下载仓库 ZIP 或从 Releases 下载压缩包；
-2. **完整解压**，不要直接在 ZIP 中运行；
-3. 放在本机非共享、非 OneDrive/Dropbox 同步目录；
-4. 双击 `点击运行IRCC查询.cmd`；
-5. 依次输入：
-   - Tracker 用户名（通常为 UCI）；
+1. 下载并完整解压项目，不要直接在 ZIP 中运行；
+2. 放到本机非共享、非 OneDrive/Dropbox 同步目录；
+3. 双击 `点击运行IRCC查询.cmd`；
+4. 输入：
+   - UCI（只输入一次；支持 `12345678`、`1234-5678`、`1234567890` 或 `12-3456-7890`）；
    - Application Number；
-   - UCI；
    - Tracker 密码；
-6. 密码输入时不会显示文字或星号，输入完按 Enter；
-7. 成功时，窗口显示状态，并在同目录生成 `StatusCheck.txt`。
+5. 密码不会显示；完成输入后终端自动清屏；
+6. 等待登录、账号申请列表和申请详情三个阶段完成。
 
-> [!WARNING]
-> 不要把密码写进 `.ps1`、`.cmd`、配置文件、Issue 或截图。不要在公共电脑或公司受管电脑上绕过安全策略运行。
+如果失败，程序会显示脱敏诊断，并提供：
 
-### Windows 阻止执行时
+```text
+R：手动重试一次
+Q：立即退出
+```
 
-1. 不要关闭 Windows Defender；
-2. 先用记事本打开 `.ps1` 检查代码；
-3. 右键下载的 ZIP 或脚本 → **属性**；
-4. 如果有“解除锁定 / Unblock”，确认来源可信后勾选并应用；
-5. 重新解压再运行。
+程序不会自动重试。第二次失败后不再提供重试。
 
-启动器使用进程级 `ExecutionPolicy Bypass`，只运行同目录中明确命名的 `IRCC_Status_Check.ps1`。它不使用 `iex`，也不会下载代码。
+## 诊断信息
 
-## 查询结果
+当前诊断版可能显示：
 
-可能显示：
+- 出错阶段；
+- 固定端点的主机和路径；
+- PowerShell 版本；
+- HTTP 传输实现；
+- TLS 协议；
+- HTTP 状态码（如果服务器有返回）；
+- Content-Type；
+- 响应字符数；
+- 请求耗时；
+- 异常类型和不含秘密信息的异常消息；
+- JWT 检查是否通过。
 
-- 系统最后更新日期；
-- Eligibility；
-- Medical；
-- Biometrics；
-- Background；
-- Security 历史节点及日期。
+诊断信息不会显示：
 
-### Security 字段说明
+- 密码；
+- UCI 或 Application Number；
+- IdToken、AccessToken、RefreshToken、Session；
+- Authorization Header；
+- 请求体或响应正文；
+- 完整申请数据。
 
-检测到 `key="Security"` 最多只能说明响应中存在一个名为 Security 的历史节点，**不能单独证明**：
+提交错误截图时，只保留红色错误和诊断区域，确认没有输入画面或个人资料。
 
-- 已进入深度安调；
-- 安调仍在进行；
-- 节点日期就是实际安调开始日期。
+## 网络与隐私
 
-应以 IRCC 正式通知、GCMS 记录或其他官方信息为准。
+本工具只访问：
+
+| 用途 | 地址 |
+|---|---|
+| Cognito 登录 | `https://cognito-idp.ca-central-1.amazonaws.com/` |
+| IRCC 查询 | `https://api.ircc-tracker-suivi.apps.cic.gc.ca/user` |
+
+它不会：
+
+- 把凭据写入脚本或日志；
+- 把 Token 写入磁盘；
+- 保存查询结果或历史；
+- 使用第三方服务器、Webhook、广告或遥测；
+- 下载或执行远程代码；
+- 关闭 TLS 证书验证；
+- 自动轮询或高频重试；
+- 修改 IRCC 申请资料。
+
+PowerShell 进程在登录时仍必须短暂持有明文密码。不要在公共电脑、受感染电脑或不受信任设备上运行。
+
+## 请求兼容性
+
+IRCC API 请求会附带：
+
+```text
+Accept: application/json
+Content-Type: application/json
+Origin: https://ircc-tracker-suivi.apps.cic.gc.ca
+Referer: https://ircc-tracker-suivi.apps.cic.gc.ca/
+User-Agent: browser-compatible value
+Cache-Control: no-store
+Pragma: no-cache
+Authorization: Bearer <temporary token>
+```
+
+这些 Header 用于提高与 IRCC 网关的正常兼容性，不用于绕过身份验证或访问控制。
 
 ## 常见错误
 
 | 错误 | 说明 |
 |---|---|
-| HTTP 401 | 登录或 Token 被拒绝 |
-| HTTP 403 | 权限或接口规则拒绝请求 |
-| HTTP 429 | 请求过于频繁，应停止并等待 |
-| HTTP 500/502/503 | IRCC 服务端或网关不可用 |
-| `underlying connection was closed` | 数据接口或网关在返回 HTTP 响应前关闭连接 |
-| `non-JSON response` | 返回了维护页面或其他非 JSON 内容 |
-| `response format may have changed` | IRCC 修改了响应结构，当前版本需要更新 |
-| 无法匹配申请记录 | 返回多条记录，但无法安全确认目标申请 |
+| Cognito HTTP 401/403 | 登录信息、Client ID 或认证流程被拒绝 |
+| Unsupported challenge | 账号要求 MFA、密码重置或其他步骤；脚本不会绕过 |
+| JWT validation failed | Token 用途、受众、签发者或有效期与预期不符 |
+| Profile summary 无申请 | 当前账号没有返回可查询申请 |
+| Application Number 不匹配 | 输入编号不在当前认证账号的 summary 中 |
+| IRCC HTTP 429 | 请求过多；停止运行并等待 |
+| IRCC HTTP 500/502/503 | IRCC 服务端或网关不可用 |
+| `underlying connection was closed` | 服务器/网关或旧网络栈在 HTTP 响应前关闭连接 |
+| 非 JSON | 可能返回维护页面 |
+| JSON 格式变化 | IRCC 修改了响应结构 |
 
-排错时只分享红色错误行。不得分享：
+## Security 字段
 
-- Tracker 用户名或密码；
-- UCI、Application Number、document number；
-- Token、Session、Authorization header；
-- 请求/响应正文；
-- 未打码截图或 `StatusCheck.txt`。
+如果返回内容包含 `key="Security"`，程序只显示：
 
-如果登录成功后出现 `underlying connection was closed`，而开关 VPN 和原版脚本结果相同，通常表示 IRCC 数据接口或中间网关不可用。此时应停止反复尝试，不要添加高频重试。
+> 检测到 Security 历史节点（不等同于确认进入深度安调）。
 
-## 删除数据
+该字段不能单独证明已进入深度安调、仍在进行或节点日期就是实际开始日期。
 
-- 删除查询历史：关闭程序后删除 `StatusCheck.txt`；
-- 停止使用：删除整个项目文件夹；
-- 如果曾把真实密码写进旧版脚本，应删除旧文件、回收站副本及云端历史；
-- 如果凭据曾上传到 GitHub、网盘或群聊，应立即修改密码。仅删除最新 commit 不能清除 Git 历史中的秘密。
+## PowerShell 7
 
-## 贡献与安全规则
+启动器会自动检查 `pwsh.exe`：
 
-提交 Issue 或 Pull Request 时：
+- 已安装：优先使用 PowerShell 7 的现代 HTTP 运行环境；
+- 未安装：使用系统自带 Windows PowerShell 5.1。
 
-- 不得使用真实凭据或申请数据；
-- 不得新增未知网络端点、遥测或 Webhook；
-- 不得关闭 TLS 证书验证；
-- 不得执行下载的代码；
-- 不得绕过 MFA、验证码、访问控制或限流；
-- 新增网络地址必须在 README 中披露；
-- 缺失字段必须显示“未能读取”，不能伪装为成功；
-- 不得把 `Security` 节点宣传为确定进入深度安调。
+程序不会自动下载或安装 PowerShell 7。
 
-发现安全问题时，请使用 GitHub Private Vulnerability Reporting，不要公开提交包含秘密信息的 Issue。
+## 安全规则
+
+- 只查询本人或获授权管理的申请；
+- 不要高频重复运行；
+- 不要分享凭据、Token、UCI、Application Number 或响应正文；
+- 不要关闭证书验证；
+- 不要把请求转发给陌生代理或第三方服务器；
+- 不要通过脚本尝试绕过 MFA、验证码、访问限制或限流。
 
 ## 已知限制
 
-- 依赖未承诺长期稳定的网页后端接口；
-- IRCC 可随时调整 Client ID、认证流程、API 或响应结构；
-- PowerShell 进程在登录时仍必须短暂持有明文密码；
-- 频繁查询可能触发限流；
-- 当前数据接口可能主动关闭连接，不能保证端到端可用；
-- 项目不提供移民或法律建议。
+- 依赖 IRCC 未公开承诺长期稳定的网页后端接口；
+- Client ID、User Pool、请求 Header、API 和 JSON 结构都可能改变；
+- `get-profile-summary` 与详情请求使用相同 API 主机，主机不可用时两个阶段都会失败；
+- 请求头和 HttpClient 只能提高兼容性，不能修复服务端中断；
+- 当前版本仍未在可稳定返回数据的 IRCC 环境中完成端到端验证。
 
-## 发布到 GitHub
+## GitHub 发布
 
-建议仓库名：
-
-```text
-ircc-tracker-safe-windows
-```
-
-首个 Release 建议：
+建议首个诊断版 Release：
 
 ```text
-Tag: v1.4.0
-Title: v1.4.0 — Initial public release
+Tag: v2.0.1-diagnostic
+Title: v2.0.1 Diagnostic Preview
 ```
 
-发布前务必确认上传列表中没有：
-
-```text
-StatusCheck.txt
-*.log
-.env
-真实凭据、Token、UCI、申请号或运行截图
-```
-
-建议开启 GitHub **Private vulnerability reporting**，并在 Release 中保留“当前 IRCC 数据接口可能不可用”的说明。
+README 顶部必须保留实验性和当前接口不稳定的提示。发布前确认仓库中没有任何真实凭据、截图、Token、日志或查询结果。
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。
+[MIT License](LICENSE)
