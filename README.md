@@ -3,7 +3,22 @@
 一个非官方、开源、隐私优先的 Windows IRCC Application Status Tracker 查询与诊断工具。
 
 > [!IMPORTANT]
-> **当前版本：v2.0.1-diagnostic（实验性）**。Cognito 登录可能成功，但 IRCC 数据接口目前可能关闭连接或返回维护错误。本工具不能保证取得申请状态，也不能修复 IRCC 服务端故障。
+> **当前版本：v2.2（实验性 / 诊断用途）**
+>
+> 实测结论：AWS Cognito 登录**可以成功**，但 IRCC 数据接口（`get-profile-summary` / `get-application-details`）目前可能返回**空列表**或 **HTTP 500 Internal Server Error**；官方网页端本身也长期显示 “We’re experiencing a technical difficulty”。
+>
+> 这说明问题出在 **IRCC 服务端**，而不是本工具、你的账号或网络。本工具**不能保证**取得申请状态，也**无法修复** IRCC 服务端故障。
+
+## 两个版本（本仓库提供两种）
+
+本工具提供两个功能相同、只在“查询流程”上不同的版本，请按需选择：
+
+| 版本 | 目录 | 查询流程 | 适用场景 |
+|---|---|---|---|
+| **Summary 预检版（本目录 · 推荐）** | `...-v2.2-summary` | 登录 → `get-profile-summary` 确认申请号属于当前账号 → `get-application-details` | 正常情况下的推荐版本，能提前拦截“申请号不属于该账号 / 账号下无申请”的问题 |
+| **跳过 Summary 版** | `...-v2.2-skip-summary` | 登录 → **直接** `get-application-details`（跳过账号申请列表预检） | 当 `get-profile-summary` 返回空 / 报错、但你想测试详情接口是否仍能单独返回结果时使用；行为与早期 `.bat` 一致 |
+
+> 说明：如果两个版本都失败（尤其是 `get-application-details` 返回 **HTTP 500**），基本可判定为 IRCC 服务端针对该账号 / 申请的故障，换任何版本或工具都无法绕过。
 
 ## 文件
 
@@ -15,6 +30,14 @@ IRCC_Status_Check.ps1      主程序
 LICENSE                    MIT License
 .gitignore                 防止误上传敏感运行文件
 ```
+
+## v2.2 更新
+
+- 提供 **Summary 预检版** 与 **跳过 Summary 版** 两个并行版本，覆盖不同的接口故障场景；
+- 补充实测诊断结论：登录成功但数据接口可能返回空或 HTTP 500，属 **IRCC 服务端问题**；
+- 修正 README 中 IRCC 查询端点笔误（正确为 `https://api.tracker-suivi.apps.cic.gc.ca/user`）；
+- 版本号与窗口标题统一更新为 v2.2；
+- 其余安全、隐私与诊断行为与 v2.0 保持一致。
 
 ## v2.0 改进
 
@@ -31,7 +54,7 @@ LICENSE                    MIT License
 - UCI 可输入纯数字或官方带连字符格式，内部统一转换为 8 位/10 位纯数字；
 - 输入 UCI 和 Application Number 后自动清屏。
 
-## 工作流程
+## 工作流程（Summary 预检版）
 
 ```text
 用户输入 UCI、Application Number、密码
@@ -102,7 +125,7 @@ Q：立即退出
 | 用途 | 地址 |
 |---|---|
 | Cognito 登录 | `https://cognito-idp.ca-central-1.amazonaws.com/` |
-| IRCC 查询 | `https://api.ircc-tracker-suivi.apps.cic.gc.ca/user` |
+| IRCC 查询 | `https://api.tracker-suivi.apps.cic.gc.ca/user` |
 
 它不会：
 
@@ -141,10 +164,10 @@ Authorization: Bearer <temporary token>
 | Cognito HTTP 401/403 | 登录信息、Client ID 或认证流程被拒绝 |
 | Unsupported challenge | 账号要求 MFA、密码重置或其他步骤；脚本不会绕过 |
 | JWT validation failed | Token 用途、受众、签发者或有效期与预期不符 |
-| Profile summary 无申请 | 当前账号没有返回可查询申请 |
+| Profile summary 无申请 | 当前账号没有返回可查询申请（可能是账号 / 申请未关联，或 IRCC 服务端故障）|
 | Application Number 不匹配 | 输入编号不在当前认证账号的 summary 中 |
 | IRCC HTTP 429 | 请求过多；停止运行并等待 |
-| IRCC HTTP 500/502/503 | IRCC 服务端或网关不可用 |
+| IRCC HTTP 500/502/503 | IRCC 服务端或网关不可用（已确认为当前主要故障类型）|
 | `underlying connection was closed` | 服务器/网关或旧网络栈在 HTTP 响应前关闭连接 |
 | 非 JSON | 可能返回维护页面 |
 | JSON 格式变化 | IRCC 修改了响应结构 |
@@ -185,11 +208,12 @@ Authorization: Bearer <temporary token>
 
 ## GitHub 发布
 
-建议首个诊断版 Release：
+建议 Release：
 
 ```text
-Tag: v2.0.1-diagnostic
-Title: v2.0.1 Diagnostic Preview
+Tag: v2.2-diagnostic
+Title: v2.2 Diagnostic — dual edition (summary / skip-summary)
+Pre-release: 是
 ```
 
 README 顶部必须保留实验性和当前接口不稳定的提示。发布前确认仓库中没有任何真实凭据、截图、Token、日志或查询结果。
@@ -197,3 +221,7 @@ README 顶部必须保留实验性和当前接口不稳定的提示。发布前�
 ## License
 
 [MIT License](LICENSE)
+
+---
+
+> 非官方项目；与 IRCC、Canada.ca 或 AWS 无任何隶属关系。

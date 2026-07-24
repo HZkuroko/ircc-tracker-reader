@@ -1,4 +1,4 @@
-# IRCC Tracker Safe Windows v2.0.1-diagnostic
+# IRCC Tracker Safe Windows v2.2-summary
 # SPDX-License-Identifier: MIT
 # Unofficial project; not affiliated with IRCC, Canada.ca, or AWS.
 # Credentials, tokens and results are kept in memory and are not written to disk.
@@ -500,7 +500,7 @@ function Show-Result {
     Write-Host '本次结果仅显示在当前窗口，不会写入文件或缓存。' -ForegroundColor DarkGray
 }
 
-Write-Host 'IRCC Tracker 安全诊断工具 v2.0.1' -ForegroundColor Cyan
+Write-Host 'IRCC Tracker 安全诊断工具 v2.2（Summary 预检版）' -ForegroundColor Cyan
 Write-Host '本版本保留脱敏诊断信息；不保存凭据、Token、结果或日志。' -ForegroundColor DarkGray
 Write-Host ''
 
@@ -517,7 +517,7 @@ try {
     $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
 
     Clear-Host
-    Write-Host 'IRCC Tracker 安全诊断工具 v2.0.1' -ForegroundColor Cyan
+    Write-Host 'IRCC Tracker 安全诊断工具 v2.2（Summary 预检版）' -ForegroundColor Cyan
     Write-Host '已隐藏刚才输入的个人资料。' -ForegroundColor DarkGray
     Write-Host ''
 
