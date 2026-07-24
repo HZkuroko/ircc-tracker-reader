@@ -1,6 +1,7 @@
 # IRCC Tracker Safe Windows
 
 一个非官方、开源的 Windows 查询脚本，用于在 IRCC Application Status Tracker 网页不可用时，尝试查询**你本人或你获授权管理的申请**。
+IRCC网站很多时候在加拿大夜间是不可访问的，目前还在测试看看接口是不是没了，现在要等到了IRCC工作时间再测试
 
 > [!IMPORTANT]
 > **当前状态：实验性。** 2026-07-24 实测中，AWS Cognito 登录可以成功，但 IRCC 数据接口可能在返回结果前主动关闭连接。因此，目前不能保证取得申请状态。本项目与 IRCC、加拿大政府或 AWS 没有隶属或授权关系。
