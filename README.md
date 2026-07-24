@@ -1,5 +1,7 @@
 # IRCC Tracker Safe Windows
 
+请去右手边release下双版本呢的，这个是改了接口，而且有两种查询方式的
+
 一个非官方、开源、隐私优先的 Windows IRCC Application Status Tracker 查询与诊断工具。
 
 > [!IMPORTANT]
