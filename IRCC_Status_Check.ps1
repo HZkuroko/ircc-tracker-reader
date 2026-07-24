@@ -7,7 +7,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $AuthUri = [Uri]'https://cognito-idp.ca-central-1.amazonaws.com/'
-$ApiUri = [Uri]'https://api.ircc-tracker-suivi.apps.cic.gc.ca/user'
+$ApiUri = [Uri]'https://api.tracker-suivi.apps.cic.gc.ca/user'
 $TrackerOrigin = 'https://ircc-tracker-suivi.apps.cic.gc.ca'
 $ClientId = '3cfutv5ffd1i622g1tn6vton5r'
 $ExpectedIssuer = 'https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_7OCkCncWC'
