@@ -1,18 +1,20 @@
 @echo off
+REM IRCC Tracker Safe Windows v2.4.1 launcher
+REM Ensures UTF-8 console output and runs the PowerShell script next to this file.
 chcp 65001 >nul
-cd /d "%~dp0"
+setlocal
+set "SCRIPT_DIR=%~dp0"
+set "PS_FILE=%SCRIPT_DIR%IRCC_Status_Check.ps1"
 
-where pwsh.exe >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-    set "PS_EXE=pwsh.exe"
-    echo [Info] Using PowerShell 7 for modern HTTP compatibility.
+REM Prefer PowerShell 7 (pwsh) if available; otherwise fall back to Windows PowerShell.
+where pwsh >nul 2>nul
+if %ERRORLEVEL%==0 (
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%PS_FILE%"
 ) else (
-    set "PS_EXE=powershell.exe"
-    echo [Info] PowerShell 7 was not found; using Windows PowerShell 5.1.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_FILE%"
 )
 
-"%PS_EXE%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0IRCC_Status_Check.ps1"
-set "EXIT_CODE=%ERRORLEVEL%"
 echo.
-pause
-exit /b %EXIT_CODE%
+echo Press any key to close this window...
+pause >nul
+endlocal

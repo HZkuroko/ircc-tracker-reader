@@ -1,140 +1,73 @@
-# IRCC Tracker Safe Windows
+# IRCC Tracker Safe (Windows) — v2.4.1 合并 · 双域名版（TLS 热修复）
 
-一个非官方、开源、隐私优先的 Windows IRCC Application Status Tracker 查询与诊断工具。
+一个**只在本机运行**的 Windows 小工具，用于查询你**自己**的 IRCC Application Status Tracker（申请状态）数据。
 
-> [!IMPORTANT]
-> **当前版本：v2.3（实验性 / 诊断用途 · 单一合并版）**
->
-> 实测结论：AWS Cognito 登录**可以成功**，但 IRCC 数据接口（`get-profile-summary` / `get-application-details`）目前可能返回**空列表**或 **HTTP 500 Internal Server Error**；官方网页端本身也长期显示 “We're experiencing a technical difficulty”。
->
-> 这说明问题多出在 **IRCC 服务端**，而不是本工具、你的账号或网络。本工具**不能保证**取得申请状态，也**无法修复** IRCC 服务端故障。
+> 非官方工具，与 IRCC / Canada.ca / AWS 无任何隶属关系。仅用于查询你本人的账户。遇到 403、WAF 拦截或限流时请勿尝试绕过。
 
-> [!NOTE]
-> **v2.3 起脚本界面全部英文**（`.ps1` 为纯 ASCII），从根本上避免在非中文 Windows 上出现中文乱码 / 脚本解析错误。中文 `使用教程.txt` 保留，仅供阅读，不参与程序运行。
+## 它是怎么工作的
 
-## 单一合并版（不再区分双版本）
+1. 用你的 UCI + 密码，向 IRCC 使用的 **AWS Cognito** 登录，拿到 IdToken；
+2. 在**本地**校验这枚 JWT（token_use / audience / issuer / 过期时间），任何一项不对都会中止；
+3. 调用 IRCC Tracker API 的两个方法：
+   - `get-profile-summary`（预检，仅供参考，**永不阻断**）；
+   - `get-application-details`（权威结果，**总是执行**）；
+4. 把结果分两段显示在**当前窗口**：Precheck（预检）+ Application details（申请详情）。
 
-v2.3 把旧的 “Summary 预检版” 和 “跳过 Summary 版” 合并为**一个版本**，采用优雅降级：
+**隐私**：密码、Token、查询结果**只存在于内存**，程序退出即消失，**不写入任何文件或缓存**。始终开启 TLS 证书验证，**从不关闭**校验，也不向任何第三方发送数据。
 
-1. **登录** → AWS Cognito 取得临时 IdToken → 本地校验 JWT；
-2. **Profile summary 预检（仅信息，不阻断）**：读取账号申请列表，判断申请号是否属于当前账号。即使返回**空 / 不匹配 / 报错**，也**不会中止**后续查询；
-3. **Application details（权威结果，始终执行）**：无论预检结果如何，都直接查询申请详情；
-4. **分区列出两段结果**：预检小结 + 申请详情。整体成败只看 **details** 这一步。
+## v2.4 相比 v2.3 的改动
 
-> 好处：一个版本涵盖所有场景，无需选择；且 “summary 是否可用” 本身成为可见的诊断线索。
+1. **Cognito 登录错误精细化**（隐私安全）：解析 Cognito 返回的错误类型（含 `x-amzn-errortype` 响应头），把常见情况翻译成可操作的提示——例如「被风控拦截（不代表密码错）」「需要重置密码」「账号未激活」「尝试次数过多，等 15 分钟」。对不存在的 UCI 统一回「UCI 或密码不正确」，**不泄露某个 UCI 是否存在**。错误信息**永远不含**密码或 Token。
+2. **申请详情解析更抗改版**：对 IRCC 可能变化的字段名做了多名称兜底（如 `relations`/`applications`/`apps`/`data`、`app`/`application`/`summary` 等）。
+3. **确定性补全证书链**：IRCC 的 API 服务器返回的证书链缺少中间证书（`Entrust OV TLS Issuing RSA CA 2`），部分环境下会报「The SSL connection could not be established」。本版把这张**公开的**中间证书内置，并在校验时补齐——**仅**作用于 IRCC 的两个 API 域名，且证书仍必须链到系统信任的根，**没有降低任何安全性**。
+4. **双域名自动 fallback**：把 API 域名与其对应的 `Origin`/`Referer` **成对**切换，先试 A、失败自动试 B，并在诊断里标明用的是哪一套。修正了旧版「API 用一个域名、Origin 用另一个」的不一致问题。
 
-## 文件
+### 两套域名（成对切换，绝不混用）
 
-```text
-README.md                  项目说明
-使用教程.txt               中文使用指南（不影响程序）
-IRCC_Status_Check.ps1      主程序（合并版）
-点击运行IRCC查询.cmd       双击运行入口（英文内容 + chcp 65001）
-LICENSE                    MIT License
-.gitignore                 防止误上传敏感运行文件
-```
+| Endpoint | API | Origin / Referer | 对应站点 |
+|---|---|---|---|
+| **A**（默认先试）| `api.tracker-suivi.apps.cic.gc.ca` | `https://tracker-suivi.apps.cic.gc.ca` | 入籍(citizenship) tracker |
+| **B**（A 失败时自动试）| `api.ircc-tracker-suivi.apps.cic.gc.ca` | `https://ircc-tracker-suivi.apps.cic.gc.ca` | 移民 application status tracker |
 
-## v2.3 更新
-
-- **合并为单一版本**：summary 预检降级为非阻断的信息步骤，无论空 / 不匹配 / 报错都继续查询 details，并同时列出两段结果与两段诊断；
-- **脚本全面英文化**：`.ps1` 内所有交互文案改为英文，文件为纯 ASCII，修复非中文系统的编码乱码 / 解析报错；
-- **浏览器兼容头**：IRCC API 请求补充 `Sec-Fetch-Site/Mode/Dest`、`sec-ch-ua` 等浏览器一致请求头（仅用于兼容，不绕过任何鉴权或访问控制）；
-- **HTTP 错误分场景诊断**：401/403/429/5xx 会根据阶段（Cognito 登录 vs IRCC 接口）给出更明确提示；
-- **修复**：`Select-RelationForUci` 误用 PowerShell 自动变量 `$matches`，已重命名。
-
-## 工作流程
-
-```text
-用户输入 UCI、Application Number、密码
-                    |
-AWS Cognito 登录并取得临时 IdToken
-                    |
-本地验证 JWT 的用途、受众、签发者和有效期
-                    |
-get-profile-summary 预检（信息，不阻断）
-                    |
-get-application-details 读取申请状态（权威）
-                    |
-分区显示 预检小结 + 申请详情；退出后不保存结果
-```
+> 如果你查的是移民/PR 类申请、想默认先试 B，把脚本顶部 `$Endpoints` 数组里 A、B 两项的顺序对调即可（两套反正都会试）。
 
 ## 使用方法
 
-1. 下载并**完整解压**项目，不要直接在 ZIP 中运行；
-2. 放到本机非共享、非 OneDrive/Dropbox 同步目录；
-3. 双击 `点击运行IRCC查询.cmd`；
-4. 依次输入 **UCI**（支持 `12345678`、`1234-5678`、`1234567890` 或 `12-3456-7890`）、**Application Number**、**Tracker 密码**（不显示）；
-5. 完成输入后终端自动清屏，等待登录、预检、详情三个阶段完成。
+1. 解压本压缩包，**保持 `.cmd` 和 `.ps1` 在同一个文件夹**里。
+2. 双击 **`点击运行IRCC查询.cmd`**（它会自动设置 UTF-8，并优先用 PowerShell 7、否则用系统自带的 Windows PowerShell）。
+3. 依次输入：
+   - **UCI**：8 或 10 位数字，可带连字符（会自动去掉）；
+   - **Application Number**：申请号；
+   - **Tracker 密码**：输入时**不会显示**任何字符，这是正常的安全行为，输完按回车。
+4. 查询结果显示在窗口里；失败时会给出**脱敏诊断**（不含密码/Token/响应体）。
 
-失败时显示脱敏诊断，并提供：
+## 常见结果说明
 
-```text
-R：手动重试一次
-Q：立即退出
-```
+- **HTTP 500 / 502 / 503**：IRCC 服务端故障，客户端无法修复，过段时间再试。
+- **HTTP 403**：被 IRCC 边缘/WAF 拦截。尽量用加拿大本地网络、关掉 VPN/代理；脚本化客户端仍可能被拦。
+- **SSL connection could not be established**：证书链问题——本版已内置中间证书自动补链，通常不再出现。
+- **登录被「security reasons」拦截**：Cognito 风控，**不代表密码错**，停止重试、稍后用官网。
 
-程序不会自动重试；第二次失败后不再提供重试。
+## 安全须知
 
-## 诊断信息
-
-可能显示：出错阶段、固定端点主机与路径、PowerShell 版本、HTTP 传输实现、TLS 协议、HTTP 状态码、Content-Type、响应字符数、请求耗时、异常类型与不含秘密的异常消息、JWT 检查结果，以及针对 HTTP 错误的 `Hint`。合并版在 details 失败时会分别打印 **profile summary** 与 **application details** 两段诊断。
-
-**不会**显示：密码、UCI / Application Number、任何 Token / Session、Authorization Header、请求体或响应正文、完整申请数据。
-
-> 提交错误截图时，只保留红色错误和诊断区域，确认没有输入画面或个人资料。
-
-## 网络与隐私
-
-本工具只访问：
-
-| 用途 | 地址 |
-|---|---|
-| Cognito 登录 | `https://cognito-idp.ca-central-1.amazonaws.com/` |
-| IRCC 查询 | `https://api.tracker-suivi.apps.cic.gc.ca/user` |
-
-它不会：写凭据 / Token 到磁盘、保存查询结果或历史、使用第三方服务器 / Webhook / 遥测、下载或执行远程代码、关闭 TLS 证书验证、自动轮询或高频重试、修改 IRCC 申请资料。
-
-> PowerShell 进程在登录时仍必须短暂持有明文密码。不要在公共电脑、受感染电脑或不受信任设备上运行。
-
-## 常见错误
-
-| 错误 | 说明 |
-|---|---|
-| Cognito HTTP 401/403 | 登录信息、Client ID 或认证流程被拒绝（可能触发风控）|
-| `NotAuthorizedException / security reasons` | Cognito 自适应认证（风控）拦截；换本地网络、关 VPN 后再试，脚本无法绕过 |
-| Unsupported challenge | 账号要求 MFA / 改密码等；脚本不会绕过 |
-| JWT validation failed | Token 用途、受众、签发者或有效期不符 |
-| Profile summary 无申请 | 账号没有返回可查询申请（账号 / 申请未关联，或服务端故障）；合并版仍会继续查 details |
-| Application Number 不匹配 | 输入编号不在当前认证账号的 summary 中；合并版仍会继续查 details |
-| IRCC HTTP 403 | 接口 / 边缘（WAF/CDN）拦截；关 VPN、用加拿大本地网络再试 |
-| IRCC HTTP 429 | 请求过多；停止并等待 |
-| IRCC HTTP 500/502/503 | IRCC 服务端或网关不可用（当前主要故障类型）|
-| 非 JSON / JSON 格式变化 | 返回维护页面，或 IRCC 修改了响应结构 |
-
-## PowerShell 7
-
-启动器自动检查 `pwsh.exe`：已安装则优先使用 PowerShell 7 的现代 HTTP 运行环境；未安装则回退到系统自带 Windows PowerShell 5.1。程序不会自动下载或安装 PowerShell 7。
-
-## 安全规则
-
-- 只查询本人或获授权管理的申请；
-- 不要高频重复运行；
-- 不要分享凭据、Token、UCI、Application Number 或响应正文；
-- 不要关闭证书验证；不要把请求转发给陌生代理；
-- 不要通过脚本尝试绕过 MFA、验证码、访问限制或限流。
-
-## 已知限制
-
-- 依赖 IRCC 未公开承诺长期稳定的网页后端接口；
-- Client ID、User Pool、请求 Header、API 与 JSON 结构都可能改变；
-- 预检与详情请求使用相同 API 主机，主机不可用时两个阶段都会失败；
-- 请求头和 HttpClient 只能提高兼容性，**不能修复服务端中断**；
-- 当前版本仍未在可稳定返回数据的 IRCC 环境中完成端到端验证。
+- 不接受用命令行参数传密码（避免进入命令历史）。
+- 不保存密码、Token 或结果。
+- 分享任何截图/报错前，请先遮盖 UCI、申请号、姓名、生日、地址等个人信息；**不要**把原始输出发到 GitHub Issue 或任何公开位置。
+- 请手动、低频查询，不要高频轮询。
 
 ## License
 
-[MIT License](LICENSE)
+MIT，见 [LICENSE](LICENSE)。
 
----
 
-> 非官方项目；与 IRCC、Canada.ca 或 AWS 无任何隶属关系。
+## v2.4.1 热修复（重要）
+
+v2.4 引入的“自定义证书校验回调（ServerCertificateCustomValidationCallback）”在 PowerShell 中会在**没有 runspace 的工作线程**上执行并抛出异常，导致**所有** TLS 连接（包括最初的 AWS Cognito 登录）直接失败，报 `The SSL connection could not be established`。因此 v2.4 会卡在登录这一步，连查询都到不了。
+
+v2.4.1 已移除该回调，改为在程序启动时把内置的 Entrust 中间证书导入到「当前用户 · 中间证书颁发机构（`CurrentUser\CA`）」存储、退出时自动移除，让**系统原生校验**自行补全证书链：
+
+- **不降低安全性**：叶证书仍必须链接到系统信任的**根**证书；中间证书存储不是信任锚。
+- **无需管理员权限**，退出时会把加进去的那张中间证书移除，保持你的证书存储原样。
+- Cognito 登录恢复正常，双域名 A→B 自动 fallback 照常工作。
+
+> 如果所在环境禁止写入 `CurrentUser\CA`（极少数受控设备），程序不会报错：主域名（endpoint A）用系统原生校验依然可用，仅备用的 ircc 域名（endpoint B）可能仍握手失败。
