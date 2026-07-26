@@ -1,4 +1,4 @@
-# IRCC Tracker Safe Windows v2.2-summary
+# IRCC Tracker Safe Windows v2.3 (merged edition)
 # SPDX-License-Identifier: MIT
 # Unofficial project; not affiliated with IRCC, Canada.ca, or AWS.
 # Credentials, tokens and results are kept in memory and are not written to disk.
@@ -30,12 +30,12 @@ function Read-RequiredText {
 
 function Read-ValidatedUci {
     while ($true) {
-        $inputValue = Read-RequiredText 'UCI（可输入纯数字或带连字符格式）'
+        $inputValue = Read-RequiredText 'UCI (digits only or hyphenated format)'
         $normalized = $inputValue -replace '[\s-]', ''
         if ($normalized -match '^(\d{8}|\d{10})$') {
             return $normalized
         }
-        Write-Host 'UCI 必须是 8 位或 10 位数字；可以带连字符，程序会自动移除。' -ForegroundColor Yellow
+        Write-Host 'UCI must be 8 or 10 digits; hyphens are allowed and will be removed automatically.' -ForegroundColor Yellow
     }
 }
 
@@ -55,9 +55,9 @@ function ConvertTo-NormalizedIdentifier {
 
 function Format-StatusValue {
     param($Value)
-    if ($null -eq $Value) { return '未能读取' }
+    if ($null -eq $Value) { return 'Unavailable' }
     if ($Value -is [string]) {
-        if ([string]::IsNullOrWhiteSpace($Value)) { return '未能读取' }
+        if ([string]::IsNullOrWhiteSpace($Value)) { return 'Unavailable' }
         return $Value
     }
     foreach ($name in @('status', 'value', 'label')) {
@@ -66,13 +66,13 @@ function Format-StatusValue {
             return [string]$nested
         }
     }
-    return '未能读取'
+    return 'Unavailable'
 }
 
 function Format-DateOnly {
     param($Value)
     if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
-        return '未能读取'
+        return 'Unavailable'
     }
     try { return ([datetimeoffset]$Value).ToString('yyyy-MM-dd') }
     catch { return [string]$Value }
@@ -106,6 +106,26 @@ function Get-SafeInnerExceptionMessage {
         return "$($Exception.InnerException.GetType().FullName): $($Exception.InnerException.Message)"
     }
     return '(none)'
+}
+
+function Get-HttpErrorHint {
+    param([string]$Stage, [int]$StatusCode)
+    $isCognito = ($Stage -like '*Cognito*')
+    switch ($StatusCode) {
+        401 {
+            if ($isCognito) { return 'Sign-in rejected (credentials, client ID, or auth flow).' }
+            return 'The IRCC API rejected authorization (token invalid or expired).'
+        }
+        403 {
+            if ($isCognito) { return 'Sign-in rejected, possibly by Cognito risk control.' }
+            return 'The IRCC API/edge (WAF/CDN) blocked this request. Try a local Canadian network without VPN/proxy; scripted clients may still be blocked.'
+        }
+        429 { return 'Too many requests. Stop and wait before trying again.' }
+        500 { return 'IRCC server error (Internal Server Error): server-side outage, no client-side fix.' }
+        502 { return 'IRCC gateway error (Bad Gateway): server-side/edge outage.' }
+        503 { return 'IRCC service unavailable: server-side outage.' }
+        default { return '' }
+    }
 }
 
 function Invoke-JsonPost {
@@ -170,6 +190,11 @@ function Invoke-JsonPost {
 
         if (-not $response.IsSuccessStatusCode) {
             $script:LastDiagnostic.AttemptResult = 'HTTP error'
+            $hint = Get-HttpErrorHint -Stage $Stage -StatusCode ([int]$response.StatusCode)
+            if (-not [string]::IsNullOrWhiteSpace($hint)) {
+                $script:LastDiagnostic.Hint = $hint
+                throw "$Stage failed with HTTP $([int]$response.StatusCode) $($response.ReasonPhrase). $hint"
+            }
             throw "$Stage failed with HTTP $([int]$response.StatusCode) $($response.ReasonPhrase)."
         }
 
@@ -208,16 +233,20 @@ function Invoke-JsonPost {
     }
 }
 
-function Show-LastDiagnostic {
-    if ($null -eq $script:LastDiagnostic) { return }
+function Show-Diagnostic {
+    param($Diagnostic)
+    if ($null -eq $Diagnostic) { return }
 
-    Write-Host ''
-    Write-Host '安全诊断信息（不包含凭据、Token 或响应正文）' -ForegroundColor Yellow
+    Write-Host 'Security diagnostics (no credentials, tokens, or response body)' -ForegroundColor Yellow
     Write-Host '--------------------------------------------------' -ForegroundColor DarkGray
-    foreach ($entry in $script:LastDiagnostic.GetEnumerator()) {
+    foreach ($entry in $Diagnostic.GetEnumerator()) {
         Write-Host ("{0}: {1}" -f $entry.Key, $entry.Value)
     }
     Write-Host '--------------------------------------------------' -ForegroundColor DarkGray
+}
+
+function Show-LastDiagnostic {
+    Show-Diagnostic $script:LastDiagnostic
 }
 
 function Read-JwtPayload {
@@ -281,36 +310,6 @@ function Get-SummaryApplicationNumber {
     return $null
 }
 
-function Confirm-ApplicationInProfile {
-    param($ProfileResponse, [string]$ApplicationNumber)
-
-    $apps = @(Get-PropertyValue $ProfileResponse 'apps')
-    if ($apps.Count -eq 0 -or $null -eq $apps[0]) {
-        $script:LastDiagnostic = [ordered]@{
-            Stage = 'Application matching'
-            Result = 'Profile summary returned no applications'
-            RequestedApplication = '(redacted)'
-        }
-        throw 'Profile summary did not return any applications.'
-    }
-
-    $needle = ConvertTo-NormalizedIdentifier $ApplicationNumber
-    foreach ($app in $apps) {
-        $candidate = Get-SummaryApplicationNumber $app
-        if ((ConvertTo-NormalizedIdentifier $candidate) -eq $needle) {
-            return $true
-        }
-    }
-
-    $script:LastDiagnostic = [ordered]@{
-        Stage = 'Application matching'
-        Result = 'No exact application-number match'
-        ReturnedApplicationCount = $apps.Count
-        RequestedApplication = '(redacted)'
-    }
-    throw 'The requested Application Number was not found in the authenticated profile.'
-}
-
 function Select-RelationForUci {
     param($Relations, [string]$Uci)
 
@@ -320,16 +319,16 @@ function Select-RelationForUci {
     }
 
     $needle = ConvertTo-NormalizedIdentifier $Uci
-    $matches = @()
+    $matched = @()
     foreach ($item in $items) {
         $candidate = Get-PropertyValue $item 'uci'
         if ((ConvertTo-NormalizedIdentifier ([string]$candidate)) -eq $needle) {
-            $matches += $item
+            $matched += $item
         }
     }
 
-    if ($matches.Count -eq 1) { return $matches[0] }
-    if ($matches.Count -gt 1) { throw 'More than one relation matched the UCI.' }
+    if ($matched.Count -eq 1) { return $matched[0] }
+    if ($matched.Count -gt 1) { throw 'More than one relation matched the UCI.' }
     if ($items.Count -eq 1) { return $items[0] }
     throw 'Could not safely match a relation to the UCI.'
 }
@@ -365,11 +364,11 @@ function Convert-DetailsToResult {
             }
         }
         $securityDate = Format-DateOnly (Get-PropertyValue $latestNode 'dateCreated')
-        $securityText = '检测到 Security 历史节点（不等同于确认进入深度安调）'
+        $securityText = 'A Security history node was detected (this does not by itself confirm secondary/background security screening).'
     }
     else {
-        $securityDate = '未检测到'
-        $securityText = '未检测到 Security 历史节点'
+        $securityDate = 'Not detected'
+        $securityText = 'No Security history node detected.'
     }
 
     $app = Get-PropertyValue $DetailsResponse 'app'
@@ -388,6 +387,77 @@ function Convert-DetailsToResult {
     }
 }
 
+function Invoke-SummaryPrecheck {
+    param([hashtable]$ApiHeaders, [string]$ApplicationNumber)
+
+    $status = [ordered]@{
+        Outcome = 'Unknown'
+        ReturnedAppCount = 0
+        AppNumberInAccount = 'Unknown'
+        Info = ''
+        Diagnostic = $null
+    }
+
+    try {
+        $profileBody = @{
+            method = 'get-profile-summary'
+            startIndex = 0
+            limit = 500
+            lob = ''
+            lastActivityDecs = $false
+            searchFilter = ''
+            statusFilter = ''
+            isAgent = $false
+        } | ConvertTo-Json -Depth 5 -Compress
+
+        $profileResponse = Invoke-JsonPost `
+            -Stage 'IRCC profile summary' `
+            -Uri $ApiUri `
+            -JsonBody $profileBody `
+            -RequestContentType 'application/json' `
+            -Headers $ApiHeaders
+
+        $status.Diagnostic = $script:LastDiagnostic
+
+        $apps = @(Get-PropertyValue $profileResponse 'apps')
+        if ($apps.Count -eq 0 -or $null -eq $apps[0]) {
+            $status.Outcome = 'Empty'
+            $status.ReturnedAppCount = 0
+            $status.AppNumberInAccount = 'Not confirmed'
+            $status.Info = 'Summary returned no applications (HTTP 200 with an empty list).'
+            return [PSCustomObject]$status
+        }
+
+        $status.ReturnedAppCount = $apps.Count
+        $needle = ConvertTo-NormalizedIdentifier $ApplicationNumber
+        $matched = $false
+        foreach ($app in $apps) {
+            $candidate = Get-SummaryApplicationNumber $app
+            if ((ConvertTo-NormalizedIdentifier $candidate) -eq $needle) {
+                $matched = $true
+                break
+            }
+        }
+
+        if ($matched) {
+            $status.Outcome = 'Matched'
+            $status.AppNumberInAccount = 'Yes'
+        }
+        else {
+            $status.Outcome = 'NoMatch'
+            $status.AppNumberInAccount = 'No'
+            $status.Info = 'The Application Number was not found among the returned applications.'
+        }
+        return [PSCustomObject]$status
+    }
+    catch {
+        $status.Outcome = 'Error'
+        $status.Info = $_.Exception.Message
+        if ($null -eq $status.Diagnostic) { $status.Diagnostic = $script:LastDiagnostic }
+        return [PSCustomObject]$status
+    }
+}
+
 function Invoke-TrackerQuery {
     param(
         [string]$Uci,
@@ -395,7 +465,7 @@ function Invoke-TrackerQuery {
         [string]$PlainPassword
     )
 
-    Write-Host '正在安全登录 IRCC Tracker...' -ForegroundColor Cyan
+    Write-Host 'Signing in to IRCC Tracker securely...' -ForegroundColor Cyan
     $authBodyObject = @{
         AuthFlow = 'USER_PASSWORD_AUTH'
         ClientId = $ClientId
@@ -431,82 +501,112 @@ function Invoke-TrackerQuery {
     $null = Test-IdToken $idToken
 
     $apiHeaders = @{
-        'Authorization' = "Bearer $idToken"
-        'Origin' = $TrackerOrigin
-        'Referer' = "$TrackerOrigin/"
-        'Accept-Language' = 'en-CA,en;q=0.9'
+        'Authorization'      = "Bearer $idToken"
+        'Origin'             = $TrackerOrigin
+        'Referer'            = "$TrackerOrigin/"
+        'Accept-Language'    = 'en-CA,en;q=0.9'
+        'Sec-Fetch-Site'     = 'same-site'
+        'Sec-Fetch-Mode'     = 'cors'
+        'Sec-Fetch-Dest'     = 'empty'
+        'sec-ch-ua'          = '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"'
+        'sec-ch-ua-mobile'   = '?0'
+        'sec-ch-ua-platform' = '"Windows"'
     }
 
-    Write-Host '正在读取账号申请列表...' -ForegroundColor Cyan
-    $profileBody = @{
-        method = 'get-profile-summary'
-        startIndex = 0
-        limit = 500
-        lob = ''
-        lastActivityDecs = $false
-        searchFilter = ''
-        statusFilter = ''
-        isAgent = $false
-    } | ConvertTo-Json -Depth 5 -Compress
+    # Stage 1: profile summary precheck. Informational only; never blocks stage 2.
+    Write-Host 'Running profile summary precheck...' -ForegroundColor Cyan
+    $summaryStatus = Invoke-SummaryPrecheck -ApiHeaders $apiHeaders -ApplicationNumber $ApplicationNumber
 
-    $profileResponse = Invoke-JsonPost `
-        -Stage 'IRCC profile summary' `
-        -Uri $ApiUri `
-        -JsonBody $profileBody `
-        -RequestContentType 'application/json' `
-        -Headers $apiHeaders
+    # Stage 2: application details. Authoritative; always attempted regardless of stage 1.
+    Write-Host 'Querying application details...' -ForegroundColor Cyan
+    $detailOutcome = 'Error'
+    $detailError = ''
+    $detailResult = $null
+    $detailDiagnostic = $null
+    try {
+        $detailsBody = @{
+            method = 'get-application-details'
+            applicationNumber = $ApplicationNumber
+            uci = $Uci
+            isAgent = $false
+        } | ConvertTo-Json -Depth 5 -Compress
 
-    $null = Confirm-ApplicationInProfile $profileResponse $ApplicationNumber
+        $detailsResponse = Invoke-JsonPost `
+            -Stage 'IRCC application details' `
+            -Uri $ApiUri `
+            -JsonBody $detailsBody `
+            -RequestContentType 'application/json' `
+            -Headers $apiHeaders
 
-    Write-Host '正在查询申请状态...' -ForegroundColor Cyan
-    $detailsBody = @{
-        method = 'get-application-details'
-        applicationNumber = $ApplicationNumber
-        uci = $Uci
-        isAgent = $false
-    } | ConvertTo-Json -Depth 5 -Compress
+        $detailDiagnostic = $script:LastDiagnostic
+        $detailResult = Convert-DetailsToResult $detailsResponse $Uci
+        $detailOutcome = 'Success'
+        $detailsBody = $null
+    }
+    catch {
+        $detailOutcome = 'Error'
+        $detailError = $_.Exception.Message
+        if ($null -eq $detailDiagnostic) { $detailDiagnostic = $script:LastDiagnostic }
+    }
 
-    $detailsResponse = Invoke-JsonPost `
-        -Stage 'IRCC application details' `
-        -Uri $ApiUri `
-        -JsonBody $detailsBody `
-        -RequestContentType 'application/json' `
-        -Headers $apiHeaders
-
-    # Remove token-bearing headers and request bodies from managed references.
+    # Scrub token-bearing references.
     $apiHeaders['Authorization'] = $null
     $idToken = $null
-    $profileBody = $null
-    $detailsBody = $null
 
-    return (Convert-DetailsToResult $detailsResponse $Uci)
+    return [PSCustomObject]@{
+        Summary = $summaryStatus
+        DetailOutcome = $detailOutcome
+        DetailError = $detailError
+        Details = $detailResult
+        DetailDiagnostic = $detailDiagnostic
+    }
 }
 
 function Show-Result {
-    param($Result)
+    param($Outcome)
 
     Clear-Host
-    Write-Host 'IRCC Tracker 查询结果' -ForegroundColor Green
+    Write-Host 'IRCC Tracker Query Result' -ForegroundColor Green
     Write-Host '==================================================' -ForegroundColor Green
-    Write-Host "系统最后更新: $($Result.LastUpdated)"
-    Write-Host "整体状态: $($Result.OverallStatus)"
-    Write-Host "Eligibility: $($Result.Eligibility)"
-    Write-Host "Medical: $($Result.Medical)"
-    Write-Host "Biometrics: $($Result.Biometrics)"
-    Write-Host "Background: $($Result.Background)"
-    Write-Host "Security: $($Result.SecurityText)"
-    Write-Host "Security 节点日期: $($Result.SecurityDate)"
+
+    $summary = $Outcome.Summary
+    Write-Host ''
+    Write-Host '--- Precheck (profile summary) ---' -ForegroundColor Cyan
+    Write-Host "Summary outcome      : $($summary.Outcome)"
+    Write-Host "Applications found   : $($summary.ReturnedAppCount)"
+    Write-Host "App# in this account : $($summary.AppNumberInAccount)"
+    if (-not [string]::IsNullOrWhiteSpace([string]$summary.Info)) {
+        Write-Host "Note                 : $($summary.Info)"
+    }
+
+    Write-Host ''
+    Write-Host '--- Application details ---' -ForegroundColor Cyan
+    if ($Outcome.DetailOutcome -eq 'Success') {
+        $r = $Outcome.Details
+        Write-Host "Last updated  : $($r.LastUpdated)"
+        Write-Host "Overall status: $($r.OverallStatus)"
+        Write-Host "Eligibility   : $($r.Eligibility)"
+        Write-Host "Medical       : $($r.Medical)"
+        Write-Host "Biometrics    : $($r.Biometrics)"
+        Write-Host "Background    : $($r.Background)"
+        Write-Host "Security      : $($r.SecurityText)"
+        Write-Host "Security date : $($r.SecurityDate)"
+    }
+    else {
+        Write-Host "Details query failed: $($Outcome.DetailError)" -ForegroundColor Red
+    }
+
     Write-Host '--------------------------------------------------'
-    Write-Host '本次结果仅显示在当前窗口，不会写入文件或缓存。' -ForegroundColor DarkGray
+    Write-Host 'This result is shown only in the current window and is not written to any file or cache.' -ForegroundColor DarkGray
 }
 
-Write-Host 'IRCC Tracker 安全诊断工具 v2.2（Summary 预检版）' -ForegroundColor Cyan
-Write-Host '本版本保留脱敏诊断信息；不保存凭据、Token、结果或日志。' -ForegroundColor DarkGray
+Write-Host 'IRCC Tracker Safe Diagnostic Tool v2.3 (merged edition)' -ForegroundColor Cyan
+Write-Host 'This edition keeps redacted diagnostics; it does not save credentials, tokens, results, or logs.' -ForegroundColor DarkGray
 Write-Host ''
 
 $uciNumber = Read-ValidatedUci
 $applicationNumber = Read-RequiredText 'Application Number'
-$securePassword = Read-Host 'Tracker 密码（输入时不会显示）' -AsSecureString
+$securePassword = Read-Host 'Tracker password (input is hidden)' -AsSecureString
 
 $bstr = [IntPtr]::Zero
 $plainPassword = $null
@@ -517,8 +617,8 @@ try {
     $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
 
     Clear-Host
-    Write-Host 'IRCC Tracker 安全诊断工具 v2.2（Summary 预检版）' -ForegroundColor Cyan
-    Write-Host '已隐藏刚才输入的个人资料。' -ForegroundColor DarkGray
+    Write-Host 'IRCC Tracker Safe Diagnostic Tool v2.3 (merged edition)' -ForegroundColor Cyan
+    Write-Host 'Your entered personal details have been hidden.' -ForegroundColor DarkGray
     Write-Host ''
 
     New-HttpTransport
@@ -526,40 +626,55 @@ try {
     $attempt = 1
     while ($attempt -le 2) {
         try {
-            Write-Host "查询尝试 $attempt / 2（第二次只会在你手动确认后执行）" -ForegroundColor DarkGray
-            $result = Invoke-TrackerQuery `
+            Write-Host "Query attempt $attempt / 2 (the second attempt runs only after you confirm manually)" -ForegroundColor DarkGray
+            $outcome = Invoke-TrackerQuery `
                 -Uci $uciNumber `
                 -ApplicationNumber $applicationNumber `
                 -PlainPassword $plainPassword
-            Show-Result $result
-            $exitCode = 0
-            break
-        }
-        catch {
-            Write-Host ''
-            Write-Host "查询失败：$($_.Exception.Message)" -ForegroundColor Red
-            Show-LastDiagnostic
+            Show-Result $outcome
 
-            if ($attempt -ge 2) {
-                Write-Host '已达到最多两次尝试，本次不再允许重试。' -ForegroundColor Yellow
+            if ($outcome.DetailOutcome -eq 'Success') {
+                $exitCode = 0
                 break
             }
 
             Write-Host ''
-            Write-Host '按 R 手动重试一次；按 Q 退出。不会自动重试。' -ForegroundColor Yellow
-            do {
-                $choice = (Read-Host '请输入 R 或 Q').Trim().ToUpperInvariant()
-            } while ($choice -ne 'R' -and $choice -ne 'Q')
-
-            if ($choice -eq 'Q') { break }
-            $attempt++
+            Write-Host "Application details did not succeed: $($outcome.DetailError)" -ForegroundColor Red
+            if ($null -ne $outcome.Summary -and $outcome.Summary.Outcome -eq 'Error') {
+                Write-Host ''
+                Write-Host '[Profile summary stage diagnostic]' -ForegroundColor Yellow
+                Show-Diagnostic $outcome.Summary.Diagnostic
+            }
             Write-Host ''
+            Write-Host '[Application details stage diagnostic]' -ForegroundColor Yellow
+            Show-Diagnostic $outcome.DetailDiagnostic
         }
+        catch {
+            Write-Host ''
+            Write-Host "Query failed: $($_.Exception.Message)" -ForegroundColor Red
+            Show-LastDiagnostic
+        }
+
+        if ($attempt -ge 2) {
+            Write-Host ''
+            Write-Host 'Reached the maximum of two attempts; no further retry is allowed.' -ForegroundColor Yellow
+            break
+        }
+
+        Write-Host ''
+        Write-Host 'Press R to retry once manually; press Q to quit. No automatic retry.' -ForegroundColor Yellow
+        do {
+            $choice = (Read-Host 'Enter R or Q').Trim().ToUpperInvariant()
+        } while ($choice -ne 'R' -and $choice -ne 'Q')
+
+        if ($choice -eq 'Q') { break }
+        $attempt++
+        Write-Host ''
     }
 }
 catch {
     Write-Host ''
-    Write-Host "程序错误：$($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Program error: $($_.Exception.Message)" -ForegroundColor Red
     Show-LastDiagnostic
 }
 finally {
