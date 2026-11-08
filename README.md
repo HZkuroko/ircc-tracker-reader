@@ -1,3 +1,9 @@
+IRCC已经修好了他们的问题了，最新是用下面这个链接，不信任的话可以直接谷歌搜应该就能搜到了，要区分Citizenship和immigrantion的网站，他们是不一样的
+https://www.canada.ca/en/immigration-refugees-citizenship/services/application/application-status-tracker.html
+
+
+
+
 # IRCC Tracker Safe (Windows) — v2.4.1 合并 · 双域名版（TLS 热修复）
 
 一个**只在本机运行**的 Windows 小工具，用于查询你**自己**的 IRCC Application Status Tracker（申请状态）数据。
