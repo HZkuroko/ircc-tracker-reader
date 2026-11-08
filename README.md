@@ -1,4 +1,4 @@
-IRCC已经修好了他们的问题了，最新是用下面这个链接，不信任的话可以直接谷歌搜应该就能搜到了，要区分Citizenship和immigrantion的网站，他们是不一样的
+# IRCC已经修好了他们的问题了，最新是用下面这个链接，不信任的话可以直接谷歌搜应该就能搜到了，要区分Citizenship和immigrantion的网站，他们是不一样的
 https://www.canada.ca/en/immigration-refugees-citizenship/services/application/application-status-tracker.html
 
 
